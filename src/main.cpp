@@ -19,10 +19,23 @@ float roll_g = 0.0f;
 float pitch_g = 0.0f;
 float yaw_g = 0.0f;
 
+float roll_acc = 0.0f;
+float pitch_acc = 0.0f;
+
+float roll = 0.0f;
+float pitch = 0.0f;
+
+float roll_offset = 0.0f;
+float pitch_offset = 0.0f;
+
+
+
 
 // Functions
 void	readAccel();
 void	readGyro();
+void	computeAccelAngles();
+float wrapAngle(float angle);
 
 void setup() {
 	Serial.begin(115200);
@@ -51,6 +64,16 @@ void setup() {
 	Wire.write(0x00);        // ±250 dps
 	Wire.endTransmission(true);
 
+	delay(200);
+	readAccel();
+	computeAccelAngles();
+	
+	roll_offset = roll_acc;
+	pitch_offset = pitch_acc;
+	roll = 0.0f;
+	pitch = 0.0f;
+	yaw_g = 0.0f;
+
 	Serial.println("EPS32 + MPU6050 @ 400Hz");
 	lastUpdate = micros();
 }
@@ -65,24 +88,36 @@ void loop() {
 
 	readAccel();
 	readGyro();
+	computeAccelAngles();
+
+	float roll_acc_rel = roll_acc - roll_offset;
+	float pitch_acc_rel = pitch_acc - pitch_offset;
+
+	roll_acc_rel = wrapAngle(roll_acc_rel);
+	pitch_acc_rel = wrapAngle(pitch_acc_rel);
 
 	// Gyro integration
-	roll_g  += gyroX * dt;
-	pitch_g -= gyroY * dt; // Based on orientation relative to me IRL I changed this to -
+	roll  = 0.98f * (roll + gyroX * dt) + 0.02f * roll_acc_rel;
+	pitch = 0.98f * (pitch - gyroY * dt) + 0.02f * pitch_acc_rel;
+	roll = wrapAngle(roll);
+	pitch = wrapAngle(pitch);
 	yaw_g   += gyroZ * dt;
+	yaw_g = wrapAngle(yaw_g);
 
 	// Print at ~40 Hz
 	static int printDiv = 0;
 	if (++printDiv >= 10) {
 		printDiv = 0;
 
-		Serial.print("GYRO ANGLES | ");
-		Serial.print("R: "); Serial.print(roll_g, 2);
-		Serial.print(" P: "); Serial.print(pitch_g, 2);
-		Serial.print(" Y: "); Serial.println(yaw_g, 2);
+		Serial.print("FUSED | R: ");
+		Serial.print(roll, 2);
+		Serial.print(" P: ");
+		Serial.print(pitch, 2);
+		Serial.print(" Y: ");
+		Serial.println(yaw_g, 2);
 	}
-}
 
+}
 
 // ------------------ IMU IO ------------------
 
@@ -115,4 +150,16 @@ void readGyro() {
 	gyroX = rawX / 131.0f;
 	gyroY = rawY / 131.0f;
 	gyroZ = rawZ / 131.0f;
+}
+
+void computeAccelAngles() {
+	roll_acc = atan2(accY, accZ) * 180.0f / PI;
+	pitch_acc = atan2(accX, sqrt(accY * accY + accZ * accZ)) * 180.0f / PI;
+
+}
+
+float wrapAngle(float angle) {
+	while (angle > 180.0f) angle -= 360.0f;
+	while (angle < -180.0f) angle += 360.0f;
+	return angle;
 }
