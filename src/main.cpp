@@ -3,6 +3,7 @@
 
 #define MPU 0x68
 
+// ARDUINO VERSION!!!!
 
 // Functions
 void	readAccel();
