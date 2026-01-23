@@ -28,6 +28,10 @@ float pitch = 0.0f;
 float roll_offset = 0.0f;
 float pitch_offset = 0.0f;
 
+float gyroBiasX = 0.0f;
+float gyroBiasY = 0.0f;
+float gyroBiasZ = 0.0f;
+
 
 
 
@@ -35,7 +39,8 @@ float pitch_offset = 0.0f;
 void	readAccel();
 void	readGyro();
 void	computeAccelAngles();
-float wrapAngle(float angle);
+float	wrapAngle(float angle);
+void	calibrateGyro();
 
 void setup() {
 	Serial.begin(115200);
@@ -64,6 +69,8 @@ void setup() {
 	Wire.write(0x00);        // ±250 dps
 	Wire.endTransmission(true);
 
+	calibrateGyro();
+
 	delay(200);
 	readAccel();
 	computeAccelAngles();
@@ -88,6 +95,9 @@ void loop() {
 
 	readAccel();
 	readGyro();
+	gyroX -= gyroBiasX;
+	gyroY -= gyroBiasY;
+	gyroZ -= gyroBiasZ;
 	computeAccelAngles();
 
 	float roll_acc_rel = roll_acc - roll_offset;
@@ -105,17 +115,18 @@ void loop() {
 	yaw_g = wrapAngle(yaw_g);
 
 	// Print at ~40 Hz
+	// Print at ~40 Hz for Processing
 	static int printDiv = 0;
 	if (++printDiv >= 10) {
 		printDiv = 0;
 
-		Serial.print("FUSED | R: ");
-		Serial.print(roll, 2);
-		Serial.print(" P: ");
-		Serial.print(pitch, 2);
-		Serial.print(" Y: ");
-		Serial.println(yaw_g, 2);
+		Serial.print(roll, 3);
+		Serial.print("/");
+		Serial.print(pitch, 3);
+		Serial.print("/");
+		Serial.println(yaw_g, 3);
 	}
+
 
 }
 
@@ -162,4 +173,25 @@ float wrapAngle(float angle) {
 	while (angle > 180.0f) angle -= 360.0f;
 	while (angle < -180.0f) angle += 360.0f;
 	return angle;
+}
+
+void calibrateGyro() {
+	int samples = 500;
+	float sumX = 0, sumY = 0, sumZ = 0;
+
+	Serial.println("Calibrating gyro... keep device still");
+
+	for (int i = 0; i < samples; i++) {
+		readGyro();
+		sumX += gyroX;
+		sumY += gyroY;
+		sumZ += gyroZ;
+		delay(3);
+	}
+
+	gyroBiasX = sumX / samples;
+	gyroBiasY = sumY / samples;
+	gyroBiasZ = sumZ / samples;
+
+	Serial.println("Gyro calibration done");
 }
