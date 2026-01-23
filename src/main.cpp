@@ -1,177 +1,118 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include <math.h>
 
-#define MPU 0x68
+#define MPU_ADDR 0x68
 
-// ESP32 I2C pins (most boards)
-#define SDA_PIN 21 // SDA
-#define SCL_PIN 22 // SLC
+#define SDA_PIN 21
+#define SLC_PIN 22
 
-// Functions
-void readAccel();
-void readGyro();
-void readAccelRaw(float &x, float &y, float &z);
-void readGyroRaw(float &x, float &y, float &z);
-void computeAccAngles();
-void calibrateIMU();
+//400 Hz update period
+constexpr uint32_t IMU_PERIOD_US = 2500;
 
-// Variables
+uint32_t lastUpdate = 0;
+
+// Raw sensor data
 float accX, accY, accZ;
 float gyroX, gyroY, gyroZ;
-float accRoll, accPitch;
-float gyroRoll, gyroPitch, gyroYaw;
-float roll, pitch, yaw;
-float gyroBiasX, gyroBiasY, gyroBiasZ;
-float accBiasX, accBiasY, accBiasZ;
 
-unsigned long prevTime;
+float roll_g = 0.0f;
+float pitch_g = 0.0f;
+float yaw_g = 0.0f;
 
-void setup()
-{
+
+// Functions
+void	readAccel();
+void	readGyro();
+
+void setup() {
 	Serial.begin(115200);
+	delay(1000);
 
-	// Explicit ESP32 I2C pins
-	Wire.begin(SDA_PIN, SCL_PIN);
+	Wire.setPins(SDA_PIN, SLC_PIN);
+	Wire.begin();
+	Wire.setClock(400000); //400 kHz I2C
 
-	// Wake up MPU6050
-	Wire.beginTransmission(MPU);
+	// Wake MPU6050
+
+	Wire.beginTransmission(MPU_ADDR);
 	Wire.write(0x6B);
 	Wire.write(0x00);
 	Wire.endTransmission(true);
 
-	Serial.println("MPU6050 Ready");
+	// Set accelerometer to ±2g
+	Wire.beginTransmission(MPU_ADDR);
+	Wire.write(0x1C);        // ACCEL_CONFIG
+	Wire.write(0x00);        // ±2g
+	Wire.endTransmission(true);
 
-	calibrateIMU();
+	// Set gyro to ±250 dps
+	Wire.beginTransmission(MPU_ADDR);
+	Wire.write(0x1B);        // GYRO_CONFIG
+	Wire.write(0x00);        // ±250 dps
+	Wire.endTransmission(true);
 
-	// Initialize gyro angles from accelerometer
-	computeAccAngles();
-	gyroRoll  = accRoll;
-	gyroPitch = accPitch;
-	gyroYaw   = 0.0f;
-
-	prevTime = millis();
+	Serial.println("EPS32 + MPU6050 @ 400Hz");
+	lastUpdate = micros();
 }
 
-void loop()
-{
-	unsigned long now = millis();
-	float dt = (now - prevTime) * 0.001f;
-	prevTime = now;
+void loop() {
+	uint32_t now = micros();
+	if (now - lastUpdate < IMU_PERIOD_US)
+		return;
+
+	float dt = (now - lastUpdate) * 1e-6f;
+	lastUpdate = now;
 
 	readAccel();
 	readGyro();
-	computeAccAngles();
 
-	gyroRoll  += gyroX * dt;
-	gyroPitch += gyroY * dt;
-	gyroYaw   += gyroZ * dt;
+	// Gyro integration
+	roll_g  += gyroX * dt;
+	pitch_g -= gyroY * dt; // Based on orientation relative to me IRL I changed this to -
+	yaw_g   += gyroZ * dt;
 
-	// Complementary filter
-	pitch = 0.95f * gyroPitch + 0.05f * accPitch;
-	roll  = 0.95f * gyroRoll  + 0.05f * accRoll;
-	yaw   = gyroYaw;
+	// Print at ~40 Hz
+	static int printDiv = 0;
+	if (++printDiv >= 10) {
+		printDiv = 0;
 
-	// Feedback
-	gyroRoll  = roll;
-	gyroPitch = pitch;
-
-	// Output: roll / pitch / yaw
-	Serial.print(roll);  Serial.print("/");
-	Serial.print(pitch); Serial.print("/");
-	Serial.println(yaw);
-
-	delay(2);
-}
-
-// -------------------- IMU Functions --------------------
-
-void readAccel()
-{
-	Wire.beginTransmission(MPU);
-	Wire.write(0x3B);
-	Wire.endTransmission(false);
-	Wire.requestFrom(MPU, 6, true);
-
-	accX = (Wire.read() << 8 | Wire.read()) / 16384.0f - accBiasX;
-	accY = (Wire.read() << 8 | Wire.read()) / 16384.0f - accBiasY;
-	accZ = (Wire.read() << 8 | Wire.read()) / 16384.0f - accBiasZ;
-}
-
-void readGyro()
-{
-	Wire.beginTransmission(MPU);
-	Wire.write(0x43);
-	Wire.endTransmission(false);
-	Wire.requestFrom(MPU, 6, true);
-
-	gyroX = (Wire.read() << 8 | Wire.read()) / 131.0f - gyroBiasX;
-	gyroY = (Wire.read() << 8 | Wire.read()) / 131.0f - gyroBiasY;
-	gyroZ = (Wire.read() << 8 | Wire.read()) / 131.0f - gyroBiasZ;
-}
-
-void computeAccAngles()
-{
-	accRoll  = atan2(accY, sqrt(accX * accX + accZ * accZ)) * 180.0f / PI;
-	accPitch = atan2(-accX, sqrt(accY * accY + accZ * accZ)) * 180.0f / PI;
-}
-
-void readAccelRaw(float &x, float &y, float &z)
-{
-	Wire.beginTransmission(MPU);
-	Wire.write(0x3B);
-	Wire.endTransmission(false);
-	Wire.requestFrom(MPU, 6, true);
-
-	x = (Wire.read() << 8 | Wire.read()) / 16384.0f;
-	y = (Wire.read() << 8 | Wire.read()) / 16384.0f;
-	z = (Wire.read() << 8 | Wire.read()) / 16384.0f;
-}
-
-void readGyroRaw(float &x, float &y, float &z)
-{
-	Wire.beginTransmission(MPU);
-	Wire.write(0x43);
-	Wire.endTransmission(false);
-	Wire.requestFrom(MPU, 6, true);
-
-	x = (Wire.read() << 8 | Wire.read()) / 131.0f;
-	y = (Wire.read() << 8 | Wire.read()) / 131.0f;
-	z = (Wire.read() << 8 | Wire.read()) / 131.0f;
-}
-
-void calibrateIMU()
-{
-	const int samples = 500;
-	float ax, ay, az;
-	float gx, gy, gz;
-
-	gyroBiasX = gyroBiasY = gyroBiasZ = 0.0f;
-	accBiasX  = accBiasY  = accBiasZ  = 0.0f;
-
-	for (int i = 0; i < samples; i++)
-	{
-		readAccelRaw(ax, ay, az);
-		readGyroRaw(gx, gy, gz);
-
-		gyroBiasX += gx;
-		gyroBiasY += gy;
-		gyroBiasZ += gz;
-
-		accBiasX += ax;
-		accBiasY += ay;
-		accBiasZ += az;
-
-		delay(2);
+		Serial.print("GYRO ANGLES | ");
+		Serial.print("R: "); Serial.print(roll_g, 2);
+		Serial.print(" P: "); Serial.print(pitch_g, 2);
+		Serial.print(" Y: "); Serial.println(yaw_g, 2);
 	}
+}
 
-	gyroBiasX /= samples;
-	gyroBiasY /= samples;
-	gyroBiasZ /= samples;
 
-	accBiasX /= samples;
-	accBiasY /= samples;
-	accBiasZ  = (accBiasZ / samples) - 1.0f;
+// ------------------ IMU IO ------------------
 
-	Serial.println("IMU Calibrated");
+void readAccel() {
+	Wire.beginTransmission(MPU_ADDR);
+	Wire.write(0x3B);
+	Wire.endTransmission(false);
+	Wire.requestFrom(MPU_ADDR, 6, true);
+
+	int16_t rawX = (int16_t)(Wire.read() << 8 | Wire.read());
+	int16_t rawY = (int16_t)(Wire.read() << 8 | Wire.read());
+	int16_t rawZ = (int16_t)(Wire.read() << 8 | Wire.read());
+
+	accX = rawX / 16384.0f;
+	accY = rawY / 16384.0f;
+	accZ = rawZ / 16384.0f;
+}
+
+
+void readGyro() {
+	Wire.beginTransmission(MPU_ADDR);
+	Wire.write(0x43);
+	Wire.endTransmission(false);
+	Wire.requestFrom(MPU_ADDR, 6, true);
+
+	int16_t rawX = (int16_t)(Wire.read() << 8 | Wire.read());
+	int16_t rawY = (int16_t)(Wire.read() << 8 | Wire.read());
+	int16_t rawZ = (int16_t)(Wire.read() << 8 | Wire.read());
+
+	gyroX = rawX / 131.0f;
+	gyroY = rawY / 131.0f;
+	gyroZ = rawZ / 131.0f;
 }
