@@ -41,6 +41,8 @@ void	readGyro();
 void	computeAccelAngles();
 float	wrapAngle(float angle);
 void	calibrateGyro();
+void	printFormattedAngles();
+void	printGyroRates();
 
 void setup() {
 	Serial.begin(115200);
@@ -108,7 +110,7 @@ void loop() {
 
 	// Gyro integration
 	roll  = 0.98f * (roll + gyroX * dt) + 0.02f * roll_acc_rel;
-	pitch = 0.98f * (pitch - gyroY * dt) + 0.02f * pitch_acc_rel;
+	pitch = 0.98f * (pitch + gyroY * dt) + 0.02f * pitch_acc_rel;
 	roll = wrapAngle(roll);
 	pitch = wrapAngle(pitch);
 	yaw_g   += gyroZ * dt;
@@ -125,6 +127,8 @@ void loop() {
 		Serial.print(pitch, 3);
 		Serial.print("/");
 		Serial.println(yaw_g, 3);
+		// printFormattedAngles();
+		// printGyroRates();
 	}
 
 
@@ -165,7 +169,7 @@ void readGyro() {
 
 void computeAccelAngles() {
 	roll_acc = atan2(accY, accZ) * 180.0f / PI;
-	pitch_acc = atan2(accX, sqrt(accY * accY + accZ * accZ)) * 180.0f / PI;
+	pitch_acc = atan2(-accX, sqrt(accY * accY + accZ * accZ)) * 180.0f / PI;
 
 }
 
@@ -194,4 +198,22 @@ void calibrateGyro() {
 	gyroBiasZ = sumZ / samples;
 
 	Serial.println("Gyro calibration done");
+}
+
+void printFormattedAngles() {
+	Serial.print("X: ");
+	Serial.print(roll, 3);
+	Serial.print(" Y: ");
+	Serial.print(pitch, 3);
+	Serial.print(" Z: ");
+	Serial.println(yaw_g, 3);
+}
+
+void printGyroRates() {
+	Serial.print("GX: ");
+	Serial.print(gyroX, 3);
+	Serial.print(" GY: ");
+	Serial.print(gyroY, 3);
+	Serial.print(" GZ: ");
+	Serial.println(gyroZ, 3);
 }
